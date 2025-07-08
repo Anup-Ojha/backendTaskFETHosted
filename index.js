@@ -201,21 +201,17 @@ async function scrapeWebsite(config, query) {
     let status = 'success'; // Default status
 
     try {
-        // 👇 Fix: Get installed Chrome path using browserFetcher
-        const browserFetcher = puppeteer.createBrowserFetcher();
-        const localRevisions = await browserFetcher.localRevisions();
-        const revisionInfo = await browserFetcher.revisionInfo(localRevisions[0]);
+    browser = await puppeteer.launch({
+        headless: 'new',
+        executablePath: puppeteer.executablePath(),
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+    });
 
-        browser = await puppeteer.launch({
-            headless: 'new', // Use the new headless mode
-            executablePath: revisionInfo.executablePath, // ✅ This is the FIX
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-        });
-
-        page = await browser.newPage();
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
-        
-        try {
+    page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+    
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+            try {
             await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
         } catch (navigationError) {
             console.error(`[${config.name}] Navigation error to ${url}: ${navigationError.message}`);
