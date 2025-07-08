@@ -191,7 +191,7 @@ async function findElementAttribute(page, parentElement, selectors, attribute) {
     return null;
 }
 
-// --- Generic Scraper Function ---
+// --- Generic Scraper Function ---// --- Generic Scraper Function ---
 async function scrapeWebsite(config, query) {
     console.log(`[${config.name}] Starting scrape for: "${query}"`);
     const url = `${config.baseUrl}${config.searchPath.replace('{query}', encodeURIComponent(query))}`;
@@ -201,19 +201,25 @@ async function scrapeWebsite(config, query) {
     let status = 'success'; // Default status
 
     try {
+        // 👇 Fix: Get installed Chrome path using browserFetcher
+        const browserFetcher = puppeteer.createBrowserFetcher();
+        const localRevisions = await browserFetcher.localRevisions();
+        const revisionInfo = await browserFetcher.revisionInfo(localRevisions[0]);
+
         browser = await puppeteer.launch({
             headless: 'new', // Use the new headless mode
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] // Recommended for Docker/Linux
+            executablePath: revisionInfo.executablePath, // ✅ This is the FIX
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
         });
+
         page = await browser.newPage();
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
         
         try {
-            await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 }); // Wait for network to be idle, up to 60s
+            await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
         } catch (navigationError) {
             console.error(`[${config.name}] Navigation error to ${url}: ${navigationError.message}`);
-            status = 'scrape_error'; // Indicate navigation failure
-            // Check for common CAPTCHA/block indicators after navigation failure or if page content is suspicious
+            status = 'scrape_error';
             const pageContent = await page.content();
             if (pageContent.includes('captcha') || pageContent.includes('robot check') || pageContent.includes('verify you are human')) {
                 status = 'captcha_detected';
@@ -221,16 +227,14 @@ async function scrapeWebsite(config, query) {
             return { items: [], status: status };
         }
 
-        // --- Basic CAPTCHA/Block Detection after page load ---
-        // Look for common CAPTCHA elements or block messages
         const captchaIndicators = [
-            'iframe[src*="recaptcha"]', // reCAPTCHA iframe
-            'div.g-recaptcha', // reCAPTCHA div
-            '#recaptcha-challenge', // reCAPTCHA challenge
-            '#px-captcha', // PerimeterX CAPTCHA
-            '#sec-captcha', // Another common CAPTCHA ID
+            'iframe[src*="recaptcha"]',
+            'div.g-recaptcha',
+            '#recaptcha-challenge',
+            '#px-captcha',
+            '#sec-captcha',
             'div[aria-label="reCAPTCHA challenge"]',
-            'text/plain; charset=UTF-8' // Sometimes a plain text block page
+            'text/plain; charset=UTF-8'
         ];
         
         let captchaFound = false;
@@ -247,7 +251,6 @@ async function scrapeWebsite(config, query) {
             return { items: [], status: 'captcha_detected' };
         }
 
-        // Evaluate the page content
         let productHandles = [];
         for (const selector of config.productCardSelectors) {
             productHandles = await page.$$(selector);
@@ -259,13 +262,10 @@ async function scrapeWebsite(config, query) {
 
         if (productHandles.length === 0) {
             console.warn(`[${config.name}] No product cards found for query "${query}" with any provided selector.`);
-            // If no product cards found, it could be genuinely no results, or a soft block/empty page.
-            // We'll report 'no_products_found' unless a CAPTCHA was explicitly detected earlier.
             return { items: [], status: 'no_products_found' };
         }
 
         const queryLower = query.toLowerCase();
-        // Extract potential storage parameters from the query
         const storageParamMatch = query.match(/\b(\d{2,4}GB)\b/i);
         const queryStorage = storageParamMatch ? storageParamMatch[1].toLowerCase() : null;
 
@@ -273,15 +273,13 @@ async function scrapeWebsite(config, query) {
             let title = await findElementText(page, handle, config.titleSelectors);
             let link = null;
             let priceText = await findElementText(page, handle, config.priceSelectors);
-            let parameter1 = ''; // Initialize parameter1
+            let parameter1 = '';
 
-            // Special handling for Amazon links to get clean ASIN-based URLs
             if (config.specialLinkHandling === 'amazon_asin') {
                 const dataAsin = await page.evaluate(el => el.getAttribute('data-asin'), handle);
                 if (dataAsin) {
                     link = `${config.baseUrl}/dp/${dataAsin}`;
                 } else {
-                    // Fallback to generic link extraction if data-asin not found
                     link = await findElementAttribute(page, handle, config.linkSelectors, 'href');
                 }
             } else {
@@ -289,44 +287,39 @@ async function scrapeWebsite(config, query) {
             }
 
             if (title && priceText && link) {
-                // Clean price string
                 let price = parseFloat(priceText.replace(config.priceCleanRegex, ''));
-                
-                // Handle relative links for non-Amazon sites if applicable
                 if (config.isRelativeLink && link && !link.startsWith('http')) {
                     link = config.baseUrl + link;
                 }
 
-                // --- Populate parameter1 if storage is found in query and title ---
                 if (queryStorage && title.toLowerCase().includes(queryStorage)) {
-                    parameter1 = queryStorage.toUpperCase(); // Use the found storage from query
+                    parameter1 = queryStorage.toUpperCase();
                 }
 
-                // No strict filtering here, all found items are pushed
-                if (!isNaN(price)) { // Ensure price is a valid number
+                if (!isNaN(price)) {
                     items.push({
                         productName: title.trim(),
                         link: link.trim(),
-                        price: price, // Keep as number for sorting
+                        price: price,
                         currency: config.currency,
                         website_name: config.name,
-                        parameter1: parameter1, // Populated parameter1
+                        parameter1: parameter1
                     });
                 }
             }
         }
+
         console.log(`[${config.name}] Found ${items.length} relevant items.`);
         return { items: items, status: 'success' };
 
     } catch (error) {
         console.error(`[${config.name}] Critical error during scraping: ${error.message}`);
-        return { items: [], status: 'scrape_error' }; // Return error status for unexpected issues
+        return { items: [], status: 'scrape_error' };
     } finally {
-        if (browser) {
-            await browser.close();
-        }
+        if (browser) await browser.close();
     }
 }
+
 
 // --- API Endpoint ---
 app.post('/api/search', async (req, res) => {
