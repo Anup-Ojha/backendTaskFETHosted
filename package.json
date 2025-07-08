@@ -3,8 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js", 
-    "postinstall": "npx puppeteer browsers install chromium" 
+    "start": "node index.js"
   },
   "keywords": [],
   "author": "",
